@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+.env
+
+# Logs and Sessions
+logs/
+app/sessions/*.json
+!app/sessions/sessions_meta.json
+
+# IDE
+.vscode/
+.idea/
+
+# dbt
+target/
+dbt_packages/
+logs/
+modules/
+profiles.yml

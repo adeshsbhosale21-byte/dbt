@@ -1,0 +1,42 @@
+[
+  {
+    "role": "human",
+    "content": "Hi"
+  },
+  {
+    "role": "ai",
+    "content": "Hello! How can I assist you today?"
+  },
+  {
+    "role": "human",
+    "content": "who am i"
+  },
+  {
+    "role": "ai",
+    "content": "I don't have access to personal information about users. However, I can help you with questions or tasks related to data, dbt, or any other topic you're interested in. How can I assist you today?"
+  },
+  {
+    "role": "human",
+    "content": "My name is Adesh"
+  },
+  {
+    "role": "ai",
+    "content": "Nice to meet you, Adesh! How can I assist you today?"
+  },
+  {
+    "role": "human",
+    "content": "Who Am I"
+  },
+  {
+    "role": "ai",
+    "content": "You are Adesh! If there's anything specific you'd like to know or discuss, feel free to let me know!"
+  },
+  {
+    "role": "human",
+    "content": "what tables we have"
+  },
+  {
+    "role": "human",
+    "content": "what tables we have"
+  }
+]

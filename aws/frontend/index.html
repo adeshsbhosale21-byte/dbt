@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>dbt MCP | AI Analytics</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        :root {
+            --bg-deep: #05070a;
+            --bg-accent: #0f121a;
+            --primary: #6366f1;
+            --primary-glow: rgba(99, 102, 241, 0.4);
+            --secondary: #a855f7;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --sidebar-width: 300px;
+            --glass: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-hover: rgba(255, 255, 255, 0.06);
+        }
+
+        * {
+            box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: var(--glass-border) transparent;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        #root {
+            display: flex;
+            width: 100%;
+            height: 100vh;
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-accent);
+            border-right: 1px solid var(--glass-border);
+            display: flex;
+            flex-direction: column;
+            padding: 24px 16px;
+            gap: 24px;
+            z-index: 10;
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 0 8px;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-family: 'Outfit', sans-serif;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+
+        .logo-text {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: 1.2rem;
+            letter-spacing: -0.5px;
+        }
+
+        .new-chat-btn {
+            background: linear-gradient(to right, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1));
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            color: var(--text-main);
+            padding: 14px;
+            border-radius: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-weight: 600;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .new-chat-btn:hover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.2);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.15);
+        }
+
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-right: 4px;
+        }
+
+        .session-item {
+            padding: 12px 14px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .session-item:hover {
+            background: var(--glass-hover);
+            color: var(--text-main);
+        }
+
+        .session-item.active {
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--text-main);
+            border-left: 3px solid var(--primary);
+            padding-left: 11px;
+        }
+
+        /* Main Content Area */
+        .main-chat {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.05), transparent 40%),
+                radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.05), transparent 40%);
+        }
+
+        .header {
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--glass-border);
+            background: rgba(5, 7, 10, 0.5);
+            backdrop-filter: blur(10px);
+        }
+
+        .header h1 {
+            margin: 0;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--text-muted);
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .chat-container {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+            width: 100%;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        /* Message Styling */
+        .message-row {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 20px 24px;
+            border-radius: 16px;
+            line-height: 1.6;
+            font-size: 1rem;
+            position: relative;
+            animation: messageFadeIn 0.4s cubic-bezier(0, 0, 0.2, 1);
+        }
+
+        @keyframes messageFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            border-bottom-right-radius: 4px;
+            box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.3);
+        }
+
+        .message.agent {
+            align-self: flex-start;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            border-bottom-left-radius: 4px;
+            backdrop-filter: blur(4px);
+        }
+
+        .message p:first-child {
+            margin-top: 0;
+        }
+
+        .message p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message pre {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 16px;
+            border-radius: 12px;
+            overflow-x: auto;
+            border: 1px solid var(--glass-border);
+            margin: 12px 0;
+        }
+
+        .message code {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.9em;
+            color: #818cf8;
+        }
+
+        .status-indicator {
+            align-self: flex-start;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .loader {
+            width: 12px;
+            height: 12px;
+            border: 2px solid var(--primary);
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            animation: rotation 1s linear infinite;
+        }
+
+        @keyframes rotation {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Input Area */
+        .input-outer {
+            padding: 20px 40px 40px;
+            background: transparent;
+        }
+
+        .input-wrapper {
+            max-width: 900px;
+            margin: 0 auto;
+            position: relative;
+            background: var(--bg-accent);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        .input-wrapper:focus-within {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 1px var(--primary), 0 20px 40px -20px rgba(99, 102, 241, 0.3);
+        }
+
+        .input-box {
+            width: 100%;
+            background: transparent;
+            border: none;
+            padding: 12px 16px;
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
+            resize: none;
+            outline: none;
+            min-height: 50px;
+            max-height: 200px;
+        }
+
+        .input-actions {
+            display: flex;
+            justify-content: flex-end;
+            padding: 8px;
+        }
+
+        .send-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .send-btn:hover:not(:disabled) {
+            background: var(--primary-hover);
+            transform: scale(1.05);
+        }
+
+        .send-btn:disabled {
+            background: var(--glass-border);
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--glass-border);
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            const [sessions, setSessions] = useState([]);
+            const [currentSessionId, setCurrentSessionId] = useState(null);
+            const [messages, setMessages] = useState([]);
+            const [input, setInput] = useState('');
+            const [ws, setWs] = useState(null);
+            const [status, setStatus] = useState('');
+            const [isConnecting, setIsConnecting] = useState(true);
+            const [isBusy, setIsBusy] = useState(false);
+            const [pendingApproval, setPendingApproval] = useState(null);
+            const chatEndRef = useRef(null);
+
+            useEffect(() => {
+                const savedId = localStorage.getItem('dbt_mcp_session_id');
+                if (savedId) setCurrentSessionId(savedId);
+                connectWebSocket();
+                return () => { if (ws) ws.close(); };
+            }, []);
+
+            useEffect(() => {
+                if (currentSessionId) {
+                    localStorage.setItem('dbt_mcp_session_id', currentSessionId);
+                }
+            }, [currentSessionId]);
+
+            useEffect(() => {
+                chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, [messages, status, pendingApproval]);
+
+            const connectWebSocket = () => {
+                setIsConnecting(true);
+                const socket = new WebSocket(`ws://${window.location.host}/ws/chat`);
+
+                socket.onopen = () => {
+                    console.log('Connected');
+                    setIsConnecting(false);
+                    setWs(socket);
+                    socket.send(JSON.stringify({ type: 'list_sessions' }));
+
+                    const savedId = localStorage.getItem('dbt_mcp_session_id');
+                    if (savedId) {
+                        socket.send(JSON.stringify({ type: 'load_session', id: savedId }));
+                    }
+                };
+
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'sessions_list') {
+                        setSessions(data.content);
+                    } else if (data.type === 'history_loaded') {
+                        setMessages(data.content.map(m => ({
+                            id: Math.random(),
+                            role: m.role === 'human' ? 'user' : 'agent',
+                            content: m.content
+                        })));
+                    } else if (data.type === 'status') {
+                        if (data.content === 'busy') setIsBusy(true);
+                        else if (data.content === 'ready') {
+                            setIsBusy(false);
+                            setStatus('');
+                            setPendingApproval(null);
+                        } else if (data.content === 'waiting_approval') {
+                            setIsBusy(false); // Enable buttons
+                            setStatus('Waiting for your approval...');
+                        }
+                    } else if (data.type === 'approval_request') {
+                        setPendingApproval({
+                            tools: data.tool,
+                        });
+                    } else if (data.type === 'agent_state') {
+                        setStatus(`Agent thinking...`);
+                        setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: data.content }]);
+                        setPendingApproval(null);
+                    } else if (data.type === 'done') {
+                        setIsBusy(false);
+                        setStatus('');
+                        setPendingApproval(null);
+                        socket.send(JSON.stringify({ type: 'list_sessions' }));
+                    } else if (data.type === 'error') {
+                        setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: `⚠️ Error: ${data.content}` }]);
+                        setIsBusy(false);
+                        setStatus('');
+                        setPendingApproval(null);
+                    }
+                };
+
+                socket.onclose = () => {
+                    setIsConnecting(true);
+                    setTimeout(connectWebSocket, 3000);
+                };
+            };
+
+            const sendApproval = (value) => {
+                if (ws) {
+                    ws.send(JSON.stringify({ type: 'approval_response', value }));
+                    setPendingApproval(null);
+                    setIsBusy(true);
+                    setStatus(value === 'yes' ? 'Executing approved action...' : 'Cancelling...');
+                }
+            };
+
+            const startNewChat = () => {
+                if (ws) ws.send(JSON.stringify({ type: 'new_chat' }));
+                setMessages([]);
+                setCurrentSessionId(null);
+                localStorage.removeItem('dbt_mcp_session_id');
+                setPendingApproval(null);
+            };
+
+            const loadSession = (id) => {
+                if (isBusy) return;
+                setCurrentSessionId(id);
+                setPendingApproval(null);
+                ws.send(JSON.stringify({ type: 'load_session', id }));
+            };
+
+            const deleteSession = (e, id) => {
+                e.stopPropagation();
+                if (confirm('Delete this session?')) {
+                    if (ws) ws.send(JSON.stringify({ type: 'delete_session', id }));
+                    if (id === currentSessionId) {
+                        setMessages([]);
+                        setCurrentSessionId(null);
+                        localStorage.removeItem('dbt_mcp_session_id');
+                    }
+                }
+            }
+
+            const sendMessage = () => {
+                if (!input.trim() || isBusy || !ws) return;
+                setMessages(prev => [...prev, { id: Date.now(), role: 'user', content: input }]);
+                ws.send(input);
+                setInput('');
+                setIsBusy(true);
+                setPendingApproval(null);
+                setStatus('Agent is processing...');
+            };
+
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            };
+
+            return (
+                <React.Fragment>
+                    <div className="sidebar">
+                        <div className="logo-area">
+                            <div className="logo-icon">D</div>
+                            <div className="logo-text">dbt MCP Agent</div>
+                        </div>
+
+                        <button className="new-chat-btn" onClick={startNewChat}>
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M8 3.33334V12.6667" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                                <path d="M3.33337 8H12.6667" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            </svg>
+                            New Analytics Chat
+                        </button>
+
+                        <div className="session-list">
+                            {sessions.map(s => (
+                                <div
+                                    key={s.id}
+                                    className={`session-item ${currentSessionId === s.id ? 'active' : ''}`}
+                                    onClick={() => loadSession(s.id)}
+                                    style={{ position: 'relative' }}
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                    </svg>
+                                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: '20px' }}>{s.title}</span>
+                                    <button
+                                        className="delete-session-btn"
+                                        onClick={(e) => deleteSession(e, s.id)}
+                                        style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            color: 'var(--text-muted)',
+                                            cursor: 'pointer',
+                                            padding: '4px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            position: 'absolute',
+                                            right: '8px'
+                                        }}
+                                    >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="main-chat">
+                        <div className="header">
+                            <h1>/ Workspace / Project Analytics</h1>
+                            <div className="connection-status">
+                                <div className="status-dot" style={{ background: isConnecting ? '#ef4444' : '#22c55e' }}></div>
+                                <span style={{ color: isConnecting ? '#ef4444' : '#22c55e' }}>
+                                    {isConnecting ? 'Disconnected' : 'Active Server'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="chat-container">
+                            {messages.length === 0 && !isBusy && !pendingApproval && (
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
+                                    <div className="logo-icon" style={{ width: 64, height: 64, fontSize: '1.5rem', marginBottom: 20 }}>D</div>
+                                    <h2 style={{ fontFamily: 'Outfit', fontWeight: 600 }}>How can I help with your dbt project?</h2>
+                                    <p style={{ fontSize: '0.9rem' }}>Ask about models, raw data, or run custom SQL analytics.</p>
+                                </div>
+                            )}
+                            {messages.map(msg => (
+                                <div key={msg.id} className="message-row">
+                                    <div className={`message ${msg.role}`}>
+                                        <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) }} />
+                                    </div>
+                                </div>
+                            ))}
+
+                            {pendingApproval && (
+                                <div className="message agent" style={{ border: '1px solid var(--primary)', background: 'rgba(99, 102, 241, 0.05)' }}>
+                                    <div style={{ fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2.5">
+                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                                        </svg>
+                                        Approval Required
+                                    </div>
+                                    <p>The agent wants to execute the following tool(s):</p>
+                                    <div style={{ background: 'rgba(0,0,0,0.2)', padding: '8px 12px', borderRadius: 8, fontFamily: 'monospace', marginBottom: 20 }}>
+                                        {pendingApproval.tools.join(', ')}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 12 }}>
+                                        <button
+                                            onClick={() => sendApproval('yes')}
+                                            style={{
+                                                flex: 1, background: 'var(--primary)', color: 'white', border: 'none',
+                                                padding: '10px', borderRadius: 8, fontWeight: 600, cursor: 'pointer'
+                                            }}
+                                        >
+                                            Approve & Run
+                                        </button>
+                                        <button
+                                            onClick={() => sendApproval('no')}
+                                            style={{
+                                                flex: 1, background: 'rgba(239, 68, 68, 0.1)', color: '#fca5a5', border: '1px solid rgba(239, 68, 68, 0.3)',
+                                                padding: '10px', borderRadius: 8, fontWeight: 600, cursor: 'pointer'
+                                            }}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {status && (
+                                <div className="status-indicator">
+                                    <span className="loader"></span>
+                                    {status}
+                                </div>
+                            )}
+                            <div ref={chatEndRef} />
+                        </div>
+
+                        <div className="input-outer">
+                            <div className="input-wrapper">
+                                <textarea
+                                    className="input-box"
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    onKeyDown={handleKeyDown}
+                                    disabled={isBusy}
+                                    placeholder={isBusy ? "Processing your data request..." : "Message AI Analytics Agent..."}
+                                    rows="1"
+                                />
+                                <div className="input-actions">
+                                    <button className="send-btn" onClick={sendMessage} disabled={isBusy || !input.trim()}>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div style={{ textAlign: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 12 }}>
+                                AI can make mistakes. Check important data queries.
+                            </div>
+                        </div>
+                    </div>
+                </React.Fragment>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>

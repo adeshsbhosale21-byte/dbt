@@ -1,0 +1,90 @@
+[
+  {
+    "role": "human",
+    "content": "Hi"
+  },
+  {
+    "role": "ai",
+    "content": "Hello! How can I assist you today?"
+  },
+  {
+    "role": "human",
+    "content": "My name is Adesh"
+  },
+  {
+    "role": "ai",
+    "content": "Nice to meet you, Adesh! How can I help you today?"
+  },
+  {
+    "role": "human",
+    "content": "Who are you"
+  },
+  {
+    "role": "ai",
+    "content": "I am a Data Analytics Agent here to assist you with data queries, analysis, and insights from your dbt project and data warehouse. How can I assist you today?"
+  },
+  {
+    "role": "human",
+    "content": "What things you can do"
+  },
+  {
+    "role": "ai",
+    "content": "I can help you with the following:\n\n1. **Data Queries**: Execute SQL queries to retrieve data from your data warehouse.\n2. **Data Analysis**: Perform calculations like counts, sums, and averages on your datasets.\n3. **Model Exploration**: Explore and provide details about your dbt models and their schemas.\n4. **Insights Generation**: Help you derive insights from your data based on your queries.\n\nLet me know what you need assistance with!"
+  },
+  {
+    "role": "human",
+    "content": "What tables we have"
+  },
+  {
+    "role": "ai",
+    "content": "I'll check the available models in your dbt project to see what tables are present. One moment, please.\n{\"tool_uses\":[{\"recipient_name\":\"functions.list\",\"parameters\":{}}]}"
+  },
+  {
+    "role": "human",
+    "content": "sure"
+  },
+  {
+    "role": "ai",
+    "content": "I will retrieve the list of models (tables) in your dbt project now. One moment, please.\nI currently don't have access to the list of models in your dbt project. Please provide me with the necessary permissions or details to proceed."
+  },
+  {
+    "role": "human",
+    "content": "yes"
+  },
+  {
+    "role": "ai",
+    "content": "I will now retrieve the list of models in your dbt project. One moment, please.\n{\"tool_uses\":[{\"recipient_name\":\"functions.list\",\"parameters\":{}}]}"
+  },
+  {
+    "role": "human",
+    "content": "approved"
+  },
+  {
+    "role": "ai",
+    "content": "I currently don't have access to the list of models in your dbt project. Please provide me with the necessary permissions or details to proceed."
+  },
+  {
+    "role": "human",
+    "content": "what are available tables"
+  },
+  {
+    "role": "human",
+    "content": "what are available tables"
+  },
+  {
+    "role": "human",
+    "content": "what are available tables"
+  },
+  {
+    "role": "ai",
+    "content": "Error executing tool list: 1 validation error for lsArguments\nresource_type\n  Input should be a valid list [type=list_type, input_value='model', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.12/v/list_type"
+  },
+  {
+    "role": "ai",
+    "content": "local_dbt_test.dim_region\nlocal_dbt_test.fct_sales\n"
+  },
+  {
+    "role": "ai",
+    "content": "The available tables (models) are:\n\n1. `local_dbt_test.dim_region`\n2. `local_dbt_test.fct_sales`"
+  }
+]
