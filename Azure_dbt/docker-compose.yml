@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  agent:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./app/sessions:/app/app/sessions
+    env_file:
+      - .env
+    environment:
+      - LOG_LEVEL=INFO
+    restart: unless-stopped

@@ -1,0 +1,12 @@
+name: 'local_dbt_test'
+version: '1.0.0'
+config-version: 2
+
+profile: 'local_dbt_test'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+
+models:
+  local_dbt_test:
+    +materialized: table

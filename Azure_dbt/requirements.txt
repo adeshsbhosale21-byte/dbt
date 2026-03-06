@@ -1,0 +1,16 @@
+fastapi>=0.111.0
+uvicorn>=0.30.1
+pydantic>=2.7.4
+langgraph
+langchain-openai
+langchain-azure-ai
+python-dotenv
+mcp
+dbt-mcp
+azure-ai-contentsafety
+azure-identity
+asyncpg
+langchain
+dbt-postgres>=1.0.0
+langgraph-checkpoint-postgres>=2.0.0
+psycopg[binary]>=3.1.0

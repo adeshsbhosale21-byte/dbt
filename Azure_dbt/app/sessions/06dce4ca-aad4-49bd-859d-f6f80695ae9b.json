@@ -1,0 +1,10 @@
+[
+  {
+    "role": "human",
+    "content": "Show me the first 5 rows of fct_sales"
+  },
+  {
+    "role": "human",
+    "content": "Show me the first 5 rows of fct_sales"
+  }
+]
