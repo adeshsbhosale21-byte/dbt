@@ -405,4 +405,5 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, workers=4)
+    # Use proxy_headers=True to handle X-Forwarded-Proto (HTTPS/WSS) behind Azure Ingress
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, proxy_headers=True, forwarded_allow_ips="*")
