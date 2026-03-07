@@ -137,7 +137,7 @@ async def handle_tool_execution(state: AgentState):
     
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         t_calls = last_message.tool_calls
-        logger.info(f"Entering 'tools' node. Executing {len(t_calls)} tools: {[call['name'] for call in t_calls]}")
+        logger.info(f"Executing {len(t_calls)} tools: {[call['name'] for call in t_calls]}")
         tools = await mcp_integration.get_langchain_tools()
         tools_map = {t.name: t for t in tools}
         
@@ -162,7 +162,14 @@ async def handle_tool_execution(state: AgentState):
 def should_continue(state: AgentState):
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "tools"
+        # HUMAN APPROVAL LOGIC:
+        # Approval is ONLY required for database-querying tools (show, query).
+        # Metadata tools like 'list' are considered safe.
+        safe_tools = ["list"]
+        for call in last_message.tool_calls:
+            if call["name"] not in safe_tools:
+                return "sensitive_tools"
+        return "safe_tools"
     return END
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -174,11 +181,22 @@ def compile_agent(checkpointer=None):
         
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", run_agent_node)
-    workflow.add_node("tools", handle_tool_execution)
+    
+    # We use the same handler for both nodes, but interrupt only before sensitive_tools
+    workflow.add_node("safe_tools", handle_tool_execution)
+    workflow.add_node("sensitive_tools", handle_tool_execution)
+    
     workflow.set_entry_point("agent")
-    workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    workflow.add_edge("tools", "agent")
-    return workflow.compile(checkpointer=checkpointer, interrupt_before=["tools"])
+    workflow.add_conditional_edges(
+        "agent", 
+        should_continue, 
+        {"safe_tools": "safe_tools", "sensitive_tools": "sensitive_tools", END: END}
+    )
+    workflow.add_edge("safe_tools", "agent")
+    workflow.add_edge("sensitive_tools", "agent")
+    
+    # The 'sensitive_tools' node will trigger the 'interrupt' requiring human approval in UI
+    return workflow.compile(checkpointer=checkpointer, interrupt_before=["sensitive_tools"])
 
 # Default in-memory app for fallback or simple runs
 app = compile_agent(MemorySaver())
