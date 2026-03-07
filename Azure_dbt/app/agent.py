@@ -167,7 +167,8 @@ def should_continue(state: AgentState):
         # Metadata tools like 'list' are considered safe.
         safe_tools = ["list"]
         for call in last_message.tool_calls:
-            if call["name"] not in safe_tools:
+            t_name = call["name"].lower().strip()
+            if t_name not in safe_tools:
                 return "sensitive_tools"
         return "safe_tools"
     return END

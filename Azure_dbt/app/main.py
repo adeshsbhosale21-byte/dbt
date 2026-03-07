@@ -357,7 +357,8 @@ async def websocket_chat(websocket: WebSocket):
                             
                             if "messages" in state_output and state_output["messages"]:
                                 latest_msg = state_output["messages"][-1]
-                                if hasattr(latest_msg, "tool_calls") and latest_msg.tool_calls:
+                                if node_name == "sensitive_tools":
+                                    # ONLY request approval if we hit the sensitive node
                                     await websocket.send_json({
                                         "type": "approval_request",
                                         "tool": [tc['name'] for tc in latest_msg.tool_calls]
@@ -365,6 +366,10 @@ async def websocket_chat(websocket: WebSocket):
                                     is_processing = False
                                     await websocket.send_json({"type": "status", "content": "waiting_approval"})
                                     return
+                                elif hasattr(latest_msg, "tool_calls") and latest_msg.tool_calls:
+                                    # Safe tools execute; we log them but don't interrupt
+                                    logger.info(f"Safe tools executing: {[tc['name'] for tc in latest_msg.tool_calls]}")
+                                    continue
                                 else:
                                     content = latest_msg.content
                                     session_messages.append({"role": "ai", "content": content})
