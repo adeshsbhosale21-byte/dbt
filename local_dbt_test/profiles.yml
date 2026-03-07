@@ -1,0 +1,6 @@
+local_dbt_test:
+  outputs:
+    dev:
+      type: duckdb
+      path: local_test.duckdb
+  target: dev

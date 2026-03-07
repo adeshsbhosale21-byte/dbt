@@ -20,4 +20,4 @@ target/
 dbt_packages/
 logs/
 modules/
-profiles.yml
+# profiles.yml
