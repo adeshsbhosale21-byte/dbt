@@ -221,13 +221,9 @@ def build_langchain_tools() -> List[Any]:
             required_fields = schema.get("required", [])
             
             for prop_name, prop_data in properties.items():
-                ptype = Any # Default to Any to be more flexible, types are enforced inside dbt-mcp
-                t = prop_data.get("type", "string")
-                if t == "integer": ptype = int
-                elif t == "number": ptype = float
-                elif t == "boolean": ptype = bool
-                elif t == "object": ptype = dict
-                elif t == "array": ptype = list
+                ptype = Any # Allow all types at the bridge level to avoid rigid Pydantic validation
+                # LLM often sends string for what should be a list, or vice versa.
+                # Actual validation happens inside the dbt-mcp server.
                 
                 desc_field = prop_data.get("description", "")
                 if prop_name in required_fields:

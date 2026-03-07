@@ -397,10 +397,42 @@ def redirect_to_app():
 
 @app.get("/health")
 def health_check():
+    from app.mcp_client import _get_dbt_project_dir, _get_venv_scripts
+    import subprocess
+    
+    scripts_dir = _get_venv_scripts()
+    dbt_project_dir = os.path.abspath(_get_dbt_project_dir())
+    
+    env = os.environ.copy()
+    env["DBT_PROJECT_DIR"] = dbt_project_dir
+    env["DBT_PROFILES_DIR"] = dbt_project_dir
+    env["PATH"] = f"{scripts_dir}{os.pathsep}{env.get('PATH', '')}"
+    
+    dbt_bin = os.path.join(scripts_dir, "dbt.exe" if os.name == "nt" else "dbt")
+    
+    dbt_debug_output = "N/A"
+    try:
+        # Run dbt debug --profiles-dir <dir> to verify connectivity
+        # We use a short timeout and capture output
+        proc = subprocess.run(
+            [dbt_bin, "debug", "--project-dir", dbt_project_dir, "--profiles-dir", dbt_project_dir],
+            capture_output=True, text=True, timeout=15, env=env
+        )
+        dbt_debug_output = proc.stdout + "\n" + proc.stderr
+    except Exception as e:
+        dbt_debug_output = f"Error running dbt debug: {e}"
+
     return {
         "status": "healthy",
         "service": "dbt-mcp-agent-azure",
-        "storage": "postgresql" if pg_pool else "local_files"
+        "storage": "postgresql" if pg_pool else "local_files",
+        "dbt_debug": dbt_debug_output,
+        "env_check": {
+            "DBT_PROJECT_DIR": dbt_project_dir,
+            "DBT_PROFILES_DIR": dbt_project_dir,
+            "DB_HOST_SET": bool(os.environ.get("DB_HOST")),
+            "PROFILE_EXISTS": os.path.exists(os.path.join(dbt_project_dir, "profiles.yml"))
+        }
     }
 
 if __name__ == "__main__":
