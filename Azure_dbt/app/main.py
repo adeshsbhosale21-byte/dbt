@@ -422,6 +422,13 @@ def health_check():
     except Exception as e:
         dbt_debug_output = f"Error running dbt debug: {e}"
 
+    dbt_files = []
+    if os.path.exists(dbt_project_dir):
+        try:
+            dbt_files = os.listdir(dbt_project_dir)
+        except Exception as e:
+            dbt_files = [f"Error listing dir: {e}"]
+
     return {
         "status": "healthy",
         "service": "dbt-mcp-agent-azure",
@@ -431,7 +438,8 @@ def health_check():
             "DBT_PROJECT_DIR": dbt_project_dir,
             "DBT_PROFILES_DIR": dbt_project_dir,
             "DB_HOST_SET": bool(os.environ.get("DB_HOST")),
-            "PROFILE_EXISTS": os.path.exists(os.path.join(dbt_project_dir, "profiles.yml"))
+            "PROFILE_EXISTS": os.path.exists(os.path.join(dbt_project_dir, "profiles.yml")),
+            "DIR_CONTENTS": dbt_files
         }
     }
 
