@@ -87,6 +87,7 @@ async def planner_node(state: AgentState):
         "You are a dbt Strategy Planner. Analyze the user request and define 2-3 steps to solve it.\n"
         "Available dbt tools: list (to find models), get_node_details (to see columns), show (to run query).\n"
         "MANDATE: Prioritize discovery (list/get_node_details) before querying (show).\n"
+        "Do NOT hallucinate or output the actual data in your plan. The plan should only be instructions for the executor on which tools to call.\n"
         "Output ONLY your plan as a concise bulleted list."
     )
     
@@ -116,10 +117,12 @@ async def executor_node(state: AgentState):
     system_prompt = (
         f"You are a Data Analytics Executor. Your current goal is to follow this plan:\n{plan_context}\n\n"
         f"Available tools: {tool_names}.\n"
-        "GUIDELINES:\n"
-        "1. Use tools one by one to fulfill the plan.\n"
-        "2. If you have enough info, provide the final answer.\n"
-        "3. NEVER hallucinate data. If you need to see rows, use 'show'."
+        "CRITICAL RULES:\n"
+        "1. YOU MUST ACTUALLY CALL THE PROVIDED TOOLS TO FETCH DATA. DO NOT pretend to use them.\n"
+        "2. NEVER output placeholders like '[Listing models...]' or '[The actual model names would be listed here]'. If you don't know the models, you MUST EXPLICITLY CALL the `list` tool.\n"
+        "3. Use tools strictly one by one to fulfill the plan. Wait for the tool result before proceeding.\n"
+        "4. If you have enough real data from the tools, provide the final answer.\n"
+        "5. NEVER hallucinate data or model names. If you need to see rows, use 'show'."
     )
     
     messages_for_llm = [SystemMessage(content=system_prompt)] + state["messages"]
