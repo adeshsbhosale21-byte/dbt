@@ -357,8 +357,10 @@ async def websocket_chat(websocket: WebSocket):
                             
                             if "messages" in state_output and state_output["messages"]:
                                 latest_msg = state_output["messages"][-1]
+                                
+                                # 1. SENSITIVE TOOLS (Approval Required)
                                 if node_name == "sensitive_tools":
-                                    # ONLY request approval if we hit the sensitive node
+                                    logger.info(f"Sensitive tools call: {[tc['name'] for tc in latest_msg.tool_calls]}")
                                     await websocket.send_json({
                                         "type": "approval_request",
                                         "tool": [tc['name'] for tc in latest_msg.tool_calls]
@@ -366,12 +368,33 @@ async def websocket_chat(websocket: WebSocket):
                                     is_processing = False
                                     await websocket.send_json({"type": "status", "content": "waiting_approval"})
                                     return
+                                    
+                                # 2. SAFE TOOLS or EXECUTOR with tool calls (Background Execution)
                                 elif hasattr(latest_msg, "tool_calls") and latest_msg.tool_calls:
-                                    # Safe tools execute; we log them but don't interrupt
-                                    logger.info(f"Safe tools executing: {[tc['name'] for tc in latest_msg.tool_calls]}")
+                                    t_names = [tc['name'] for tc in latest_msg.tool_calls]
+                                    logger.info(f"Background executing tools: {t_names}")
+                                    # Send status update so user knows agent is "thinking" or "calling"
+                                    await websocket.send_json({
+                                        "type": "agent_thinking", 
+                                        "content": f"Thinking... (Calling {', '.join(t_names)})"
+                                    })
                                     continue
+                                    
+                                # 3. TOOL OUTPUTS (Safe)
+                                elif isinstance(latest_msg, ToolMessage):
+                                    t_name = getattr(latest_msg, "name", "tool")
+                                    logger.debug(f"Tool {t_name} output received.")
+                                    await websocket.send_json({
+                                        "type": "agent_thinking", 
+                                        "content": f"Discovery: Received data from {t_name}"
+                                    })
+                                    continue
+
+                                # 4. FINAL or INTERMEDIATE AI RESPONSES
                                 else:
                                     content = latest_msg.content
+                                    if not content: continue
+                                    
                                     session_messages.append({"role": "ai", "content": content})
                                     await save_history(current_thread_id, session_messages)
                                     await websocket.send_json({

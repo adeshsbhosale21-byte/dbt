@@ -17,6 +17,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 # Define state dictionary for LangGraph
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
+    plan: str
 
 # ─── LLM Initialization ───
 # Priority: Azure AI Foundry > Azure OpenAI > Direct OpenAI > Mock
@@ -74,60 +75,66 @@ def get_llm():
 llm, USE_MOCK = get_llm()
 
 
-async def run_agent_node(state: AgentState):
+async def planner_node(state: AgentState):
+    """Generates a high-level plan for the dbt task."""
+    logger.info("Entering 'planner' node")
+    
+    # Simple strategy: If it's the first message, plan. Otherwise, skip or refine.
+    if len(state["messages"]) > 1 and any(isinstance(m, ToolMessage) for m in state["messages"]):
+        return {"plan": state.get("plan", "Follow the existing steps.")}
+
+    prompt = (
+        "You are a dbt Strategy Planner. Analyze the user request and define 2-3 steps to solve it.\n"
+        "Available dbt tools: list (to find models), get_node_details (to see columns), show (to run query).\n"
+        "MANDATE: Prioritize discovery (list/get_node_details) before querying (show).\n"
+        "Output ONLY your plan as a concise bulleted list."
+    )
+    
+    messages = [SystemMessage(content=prompt)] + state["messages"]
+    response = await llm.ainvoke(messages)
+    
+    return {
+        "messages": [AIMessage(content=f"**Plan:**\n{response.content}")],
+        "plan": response.content
+    }
+
+async def executor_node(state: AgentState):
     """
-    Main Agent Node. Dynamically fetches MCP tools from the dbt-mcp server.
+    Executor Node (formerly agent node). Executes tools to fulfill the plan.
     """
-    logger.debug(f"Entering 'agent' node. Message count: {len(state['messages'])}")
+    logger.debug(f"Entering 'executor' node. Message count: {len(state['messages'])}")
     tools = await mcp_integration.get_langchain_tools()
     
     if not tools:
         logger.warning("No tools discovered!")
-        system_prompt = (
-            "You are a Data Analytics Agent, but you CURRENTLY HAVE NO ACCESS to the dbt project tools.\n"
-            "MANDATE: Inform the user that you currently don't have access and suggest checking the logs or DBT_PROJECT_DIR.\n"
-            "DO NOT hallucinate tool names or output raw JSON blocks."
-        )
-        messages_for_llm = [SystemMessage(content=system_prompt)] + state["messages"]
-        response = await llm.ainvoke(messages_for_llm)
-        return {"messages": [response]}
+        return {"messages": [AIMessage(content="Error: No dbt tools available.")]}
 
     llm_with_tools = llm.bind_tools(tools)
     tool_names = ", ".join([t.name for t in tools])
     
+    plan_context = state.get("plan", "No plan defined.")
     system_prompt = (
-        f"You are a high-performance Data Analytics Agent powered by Azure AI. "
-        f"You have DIRECT access to a dbt project and data warehouse via these tools: {tool_names}.\n\n"
-        "CORE MANDATE:\n"
-        "1. NEVER say 'I don't have the capability to execute SQL'. YOU CAN run it using the 'show' tool.\n"
-        "2. If the user asks for data (counts, rows, sums), YOU MUST use the 'show' tool.\n"
-        "3. First, use 'list' to find models. Then 'get_node_details_dev' for schema. Finally 'show' for results.\n"
-        "4. Your SQL should be valid Jinja/SQL for the target warehouse (DuckDB or Azure Synapse).\n\n"
-        "SECURITY & FORMATTING:\n"
-        "- NO destructive commands (DROP, DELETE, etc.).\n"
-        "- ONLY use native function calling (no raw JSON blocks in text).\n"
-        "- Always be concise and data-driven."
+        f"You are a Data Analytics Executor. Your current goal is to follow this plan:\n{plan_context}\n\n"
+        f"Available tools: {tool_names}.\n"
+        "GUIDELINES:\n"
+        "1. Use tools one by one to fulfill the plan.\n"
+        "2. If you have enough info, provide the final answer.\n"
+        "3. NEVER hallucinate data. If you need to see rows, use 'show'."
     )
     
-    logger.debug(f"System Prompt length: {len(system_prompt)}")
     messages_for_llm = [SystemMessage(content=system_prompt)] + state["messages"]
     
     if USE_MOCK:
-        logger.info("Using MOCK execution for agent node")
-        response = AIMessage(content="Simulated dbt-mcp execution against Azure Synapse completed.")
-    else:
-        logger.info("Invoking LLM for agent node...")
-        try:
-            response = await asyncio.wait_for(
-                llm_with_tools.ainvoke(messages_for_llm),
-                timeout=60.0
-            )
-            logger.debug(f"LLM Response received: tool_calls={getattr(response, 'tool_calls', [])}")
-        except asyncio.TimeoutError:
-            logger.error("LLM call timed out after 60 seconds!")
-            response = AIMessage(content="Sorry, the LLM call timed out. Please try again.")
-        
-    return {"messages": [response]}
+        return {"messages": [AIMessage(content="[Mock] Executing plan step...")]}
+    
+    try:
+        response = await asyncio.wait_for(
+            llm_with_tools.ainvoke(messages_for_llm),
+            timeout=60.0
+        )
+        return {"messages": [response]}
+    except asyncio.TimeoutError:
+        return {"messages": [AIMessage(content="Execution timed out.")]}
 
 
 async def handle_tool_execution(state: AgentState):
@@ -143,29 +150,25 @@ async def handle_tool_execution(state: AgentState):
         
         for call in t_calls:
             t_name = call["name"]
-            logger.debug(f"Invoking tool '{t_name}' with args: {call['args']}")
             tool_fn = tools_map.get(t_name)
             if tool_fn:
                 try:
                     result = await tool_fn.ainvoke(call["args"])
-                    logger.debug(f"Tool '{t_name}' success. Result length: {len(str(result))}")
                     responses.append(ToolMessage(content=result, tool_call_id=call["id"], name=t_name))
                 except Exception as e:
-                    logger.error(f"Error executing tool '{t_name}': {e}", exc_info=True)
                     responses.append(ToolMessage(content=f"Error: {str(e)}", tool_call_id=call["id"], name=t_name))
             else:
-                logger.error(f"Tool '{t_name}' not found!")
                 responses.append(ToolMessage(content=f"Error: Tool '{t_name}' not found.", tool_call_id=call["id"], name=t_name))
                 
     return {"messages": responses}
 
 def should_continue(state: AgentState):
+    """Determines if the graph should proceed to tools or end."""
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        # HUMAN APPROVAL LOGIC:
-        # Approval is ONLY required for database-querying tools (show, query).
-        # Metadata tools like 'list' are considered safe.
-        safe_tools = ["list"]
+        # SAFE TOOLS: list, get_node_details, get_node_details_dev
+        # NO human approval needed for these.
+        safe_tools = ["list", "get_node_details", "get_node_details_dev"]
         for call in last_message.tool_calls:
             t_name = call["name"].lower().strip()
             if t_name not in safe_tools:
@@ -176,28 +179,31 @@ def should_continue(state: AgentState):
 from langgraph.checkpoint.memory import MemorySaver
 
 def compile_agent(checkpointer=None):
-    """Compiles the agent graph with an optional persistent checkpointer."""
+    """Compiles the planner-executor graph."""
     if checkpointer is None:
         checkpointer = MemorySaver()
         
     workflow = StateGraph(AgentState)
-    workflow.add_node("agent", run_agent_node)
     
-    # We use the same handler for both nodes, but interrupt only before sensitive_tools
+    workflow.add_node("planner", planner_node)
+    workflow.add_node("executor", executor_node)
     workflow.add_node("safe_tools", handle_tool_execution)
     workflow.add_node("sensitive_tools", handle_tool_execution)
     
-    workflow.set_entry_point("agent")
+    workflow.set_entry_point("planner")
+    
+    workflow.add_edge("planner", "executor")
+    
     workflow.add_conditional_edges(
-        "agent", 
+        "executor", 
         should_continue, 
         {"safe_tools": "safe_tools", "sensitive_tools": "sensitive_tools", END: END}
     )
-    workflow.add_edge("safe_tools", "agent")
-    workflow.add_edge("sensitive_tools", "agent")
     
-    # The 'sensitive_tools' node will trigger the 'interrupt' requiring human approval in UI
+    workflow.add_edge("safe_tools", "executor")
+    workflow.add_edge("sensitive_tools", "executor")
+    
     return workflow.compile(checkpointer=checkpointer, interrupt_before=["sensitive_tools"])
 
-# Default in-memory app for fallback or simple runs
+# Global app instance
 app = compile_agent(MemorySaver())

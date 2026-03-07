@@ -480,8 +480,9 @@
                         setPendingApproval({
                             tools: data.tool,
                         });
+                    } else if (data.type === 'agent_thinking') {
+                        setStatus(data.content);
                     } else if (data.type === 'agent_state') {
-                        setStatus(`Agent thinking...`);
                         setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: data.content }]);
                         setPendingApproval(null);
                     } else if (data.type === 'done') {
