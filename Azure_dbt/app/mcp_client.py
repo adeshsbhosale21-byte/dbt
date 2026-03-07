@@ -65,7 +65,7 @@ def fetch_mcp_tool_schemas() -> list:
     
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "dbt_mcp.main", "--project-dir", dbt_project_dir],
+            [sys.executable, "-m", "dbt_mcp.main", "--project-dir", dbt_project_dir, "--profiles-dir", dbt_project_dir],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -92,7 +92,7 @@ def fetch_mcp_tool_schemas() -> list:
                 continue
         return tools
     except subprocess.TimeoutExpired:
-        proc.kill()
+        if 'proc' in locals(): proc.kill()
         logger.error("dbt-mcp schema fetch timed out after 60s")
         return []
     except Exception as e:
@@ -116,6 +116,7 @@ def call_mcp_tool_sync(tool_name: str, arguments: dict) -> str:
     dbt_project_dir = os.path.abspath(_get_dbt_project_dir())
     env["DBT_PROJECT_DIR"] = dbt_project_dir
     env["DBT_PROFILES_DIR"] = dbt_project_dir
+    
     # Force DBT_PATH if not set or incorrect
     if not env.get("DBT_PATH"):
         env["DBT_PATH"] = os.path.join(scripts_dir, "dbt.exe" if os.name == "nt" else "dbt")
@@ -137,7 +138,7 @@ def call_mcp_tool_sync(tool_name: str, arguments: dict) -> str:
     
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "dbt_mcp.main", "--project-dir", dbt_project_dir],
+            [sys.executable, "-m", "dbt_mcp.main", "--project-dir", dbt_project_dir, "--profiles-dir", dbt_project_dir],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -153,15 +154,19 @@ def call_mcp_tool_sync(tool_name: str, arguments: dict) -> str:
             try:
                 data = json.loads(line)
                 if isinstance(data, dict) and data.get("id") == 2:
-                    content = data.get("result", {}).get("content", [])
+                    result = data.get("result", {})
+                    if "isError" in result and result["isError"]:
+                        return f"Tool Error: {result.get('content', 'Unknown error')}"
+                    
+                    content = result.get("content", [])
                     if isinstance(content, list):
                         return " ".join(c.get("text", "") for c in content)
                     return str(content)
             except json.JSONDecodeError:
                 continue
-        return "No result returned."
+        return f"No result returned. Stderr: {stderr}"
     except subprocess.TimeoutExpired:
-        proc.kill()
+        if 'proc' in locals(): proc.kill()
         return f"Tool '{tool_name}' timed out after 60s."
     except Exception as e:
         return f"Tool error: {e}"
@@ -191,24 +196,32 @@ def build_langchain_tools() -> List[Any]:
         tool_name = raw_tool.get("name", "")
         tool_desc = raw_tool.get("description", "")
         input_schema = raw_tool.get("inputSchema") or {}
-        if isinstance(input_schema, dict):
-            input_schema = input_schema
-        else:
-            input_schema = {}
         
         def _make_tool(name: str, desc: str, schema: dict):
+            # Pre-calculate fields that expect lists to handle string fallbacks
+            list_params = []
+            properties = schema.get("properties", {})
+            for p_name, p_data in properties.items():
+                if p_data.get("type") == "array":
+                    list_params.append(p_name)
+
             async def _invoke(**kwargs) -> str:
+                # Fallback: if a param expects a list but the LLM sent a string, wrap it.
+                # This fixes "Input should be a valid list" validation errors.
+                for lp in list_params:
+                    if lp in kwargs and isinstance(kwargs[lp], str):
+                        kwargs[lp] = [kwargs[lp]]
+                
                 # Run synchronous subprocess in thread pool to not block the event loop
                 loop = asyncio.get_event_loop()
                 return await loop.run_in_executor(None, call_mcp_tool_sync, name, kwargs)
             
             # Build Pydantic model for strong typing
             fields = {}
-            properties = schema.get("properties", {})
             required_fields = schema.get("required", [])
             
             for prop_name, prop_data in properties.items():
-                ptype = str
+                ptype = Any # Default to Any to be more flexible, types are enforced inside dbt-mcp
                 t = prop_data.get("type", "string")
                 if t == "integer": ptype = int
                 elif t == "number": ptype = float
