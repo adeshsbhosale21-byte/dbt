@@ -221,9 +221,17 @@ def build_langchain_tools() -> List[Any]:
             required_fields = schema.get("required", [])
             
             for prop_name, prop_data in properties.items():
-                ptype = Any # Allow all types at the bridge level to avoid rigid Pydantic validation
-                # LLM often sends string for what should be a list, or vice versa.
-                # Actual validation happens inside the dbt-mcp server.
+                # Map JSON schema types to Python types for strong Pydantic validation
+                schema_type = prop_data.get("type", "string")
+                type_map = {
+                    "string": str,
+                    "integer": int,
+                    "number": float,
+                    "boolean": bool,
+                    "array": list,
+                    "object": dict
+                }
+                ptype = type_map.get(schema_type, str)
                 
                 desc_field = prop_data.get("description", "")
                 if prop_name in required_fields:
