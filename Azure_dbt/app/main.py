@@ -9,6 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Dict, List
 from app.agent import app as agent_app, compile_agent
+from app.mcp_client import mcp_integration
 from app.security import apply_guardrails
 from app.logger import get_logger, request_id_var
 
