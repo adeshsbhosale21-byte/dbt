@@ -1,0 +1,5 @@
+account_id,customer_name,account_type,created_at
+A001,John Doe,checking,2023-01-15
+A002,Jane Smith,savings,2023-02-20
+A003,Acme Corp,business,2023-05-10
+A004,Alice Johnson,checking,2023-08-05

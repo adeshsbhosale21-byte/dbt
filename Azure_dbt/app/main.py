@@ -449,10 +449,21 @@ async def websocket_chat(websocket: WebSocket):
                     if current_state.next and "sensitive_tools" in current_state.next:
                         latest_msg = current_state.values["messages"][-1]
                         logger.info(f"Graph paused for sensitive tools: {[tc['name'] for tc in latest_msg.tool_calls]}")
+                        # Ensure arguments are dicts for clean frontend display
+                        arguments_list = []
+                        for tc in latest_msg.tool_calls:
+                            args = tc.get('args', {})
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except:
+                                    pass
+                            arguments_list.append(args)
+
                         await websocket.send_json({
                             "type": "approval_request",
                             "tool": [tc['name'] for tc in latest_msg.tool_calls],
-                            "arguments": [tc.get('args', {}) for tc in latest_msg.tool_calls]
+                            "arguments": arguments_list
                         })
                         is_processing = False
                         await websocket.send_json({"type": "status", "content": "waiting_approval"})

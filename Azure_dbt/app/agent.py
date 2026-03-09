@@ -14,6 +14,19 @@ logger = get_logger("agent")
 load_dotenv()
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
+# ─── Phoenix Tracing Setup ───
+import phoenix as px
+from openinference.instrumentation.langchain import LangChainInstrumentor
+
+logger.info("Initializing Arize Phoenix Tracing...")
+try:
+    # Launch local Phoenix server. It will run in the background.
+    session = px.launch_app(host="0.0.0.0", port=6006)
+    LangChainInstrumentor().instrument()
+    logger.info(f"Phoenix Tracing active! Access dashboard at: {session.url}")
+except Exception as e:
+    logger.error(f"Failed to initialize Phoenix: {e}")
+
 # Define state dictionary for LangGraph
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]

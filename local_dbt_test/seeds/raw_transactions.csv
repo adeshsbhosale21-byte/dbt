@@ -1,0 +1,8 @@
+transaction_id,account_id,amount,currency,status,transaction_date,merchant_name
+T1001,A001,150.50,USD,completed,2023-10-01,Amazon
+T1002,A002,45.00,USD,completed,2023-10-01,Starbucks
+T1003,A001,89.99,USD,pending,2023-10-02,Target
+T1004,A003,1200.00,USD,completed,2023-10-02,Apple Store
+T1005,A002,12.50,USD,failed,2023-10-03,Uber
+T1006,A004,500.00,USD,completed,2023-10-03,Delta Airlines
+T1007,A001,25.00,USD,completed,2023-10-04,Netflix
