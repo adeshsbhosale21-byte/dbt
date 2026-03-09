@@ -28,167 +28,146 @@ def _get_dbt_project_dir():
         os.path.join(os.path.dirname(__file__), "..", "local_dbt_test"))
 
 
+class PersistentMcpClient:
+    """
+    Maintains a single long-running dbt-mcp subprocess to avoid the 15s
+    startup/manifest-loading penalty on every tool call.
+    """
+    def __init__(self):
+        self.proc = None
+        self.lock = asyncio.Lock()
+        self._initialized = False
+
+    async def _start_if_needed(self):
+        if self.proc and self.proc.poll() is None:
+            return
+
+        logger.info("Starting persistent dbt-mcp subprocess...")
+        scripts_dir = _get_venv_scripts()
+        env = os.environ.copy()
+        env["PATH"] = f"{scripts_dir}{os.pathsep}{env.get('PATH', '')}"
+        
+        for key, value in os.environ.items():
+            if key.startswith("DBT_") or key.startswith("DB_") or key.startswith("DISABLE_"):
+                env[key] = value
+
+        dbt_project_dir = os.path.abspath(_get_dbt_project_dir())
+        env["DBT_PROJECT_DIR"] = dbt_project_dir
+        env["DBT_PROFILES_DIR"] = dbt_project_dir
+        
+        if not env.get("DBT_PATH"):
+            env["DBT_PATH"] = os.path.join(scripts_dir, "dbt.exe" if os.name == "nt" else "dbt")
+
+        self.proc = subprocess.Popen(
+            [sys.executable, "-m", "dbt_mcp.main", "--project-dir", dbt_project_dir, "--profiles-dir", dbt_project_dir],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            bufsize=1 # Line buffered
+        )
+
+        # MCP Init Handshake
+        init_messages = [
+            {"jsonrpc": "2.0", "id": "init_1", "method": "initialize", "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "agent", "version": "1.0"}
+            }},
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+        ]
+        
+        for msg in init_messages:
+            self.proc.stdin.write(json.dumps(msg) + "\n")
+            self.proc.stdin.flush()
+            if "id" in msg:
+                # Wait for init response
+                self.proc.stdout.readline()
+
+        self._initialized = True
+        logger.info("Persistent dbt-mcp initialized and ready.")
+
+    async def call_tool(self, tool_name: str, arguments: dict) -> str:
+        async with self.lock:
+            await self._start_if_needed()
+            
+            request_id = f"call_{tool_name}_{os.urandom(4).hex()}"
+            msg = {
+                "jsonrpc": "2.0", 
+                "id": request_id, 
+                "method": "tools/call", 
+                "params": {
+                    "name": tool_name,
+                    "arguments": arguments
+                }
+            }
+            
+            try:
+                self.proc.stdin.write(json.dumps(msg) + "\n")
+                self.proc.stdin.flush()
+                
+                # Simple line-by-line listener for our ID
+                # In a real heavy-traffic app we'd use a reader task + futures,
+                # but for an agent context this synchronous-style read over pipe is fine.
+                while True:
+                    line = self.proc.stdout.readline()
+                    if not line: break
+                    data = json.loads(line)
+                    if data.get("id") == request_id:
+                        result = data.get("result", {})
+                        if result.get("isError"):
+                            return f"Tool Error: {result.get('content')}"
+                        content = result.get("content", [])
+                        if isinstance(content, list):
+                            return " ".join(c.get("text", "") for c in content)
+                        return str(content)
+            except Exception as e:
+                logger.error(f"Persistent call error: {e}")
+                if self.proc: self.proc.kill()
+                return f"Error communicating with dbt-mcp: {e}"
+
+        return "No response from tool."
+
+_persistent_client = PersistentMcpClient()
+
 def fetch_mcp_tool_schemas() -> list:
-    """
-    Fetches the list of available tools from dbt-mcp by running it as a subprocess
-    and sending a ListTools JSON-RPC request over stdin/stdout.
-    Returns a list of dicts: [{name, description, inputSchema}, ...]
-    """
+    """Uses a one-off call for discovery (only happens once)."""
     scripts_dir = _get_venv_scripts()
     env = os.environ.copy()
     env["PATH"] = f"{scripts_dir}{os.pathsep}{env.get('PATH', '')}"
-    
-    # Ensure all relevant env vars from .env are passed
     for key, value in os.environ.items():
         if key.startswith("DBT_") or key.startswith("DB_") or key.startswith("DISABLE_"):
             env[key] = value
-
     dbt_project_dir = os.path.abspath(_get_dbt_project_dir())
-    env["DBT_PROJECT_DIR"] = dbt_project_dir
-    env["DBT_PROFILES_DIR"] = dbt_project_dir
-    # Force DBT_PATH if not set or incorrect
-    if not env.get("DBT_PATH"):
-        env["DBT_PATH"] = os.path.join(scripts_dir, "dbt.exe" if os.name == "nt" else "dbt")
     
-    # MCP init handshake + list tools request
     messages = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "agent", "version": "1.0"}
-        }},
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05","capabilities": {},"clientInfo": {"name": "agent", "version": "1.0"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
     ]
-    
     stdin_data = "\n".join(json.dumps(m) for m in messages) + "\n"
     
     try:
         proc = subprocess.Popen(
             [sys.executable, "-m", "dbt_mcp.main", "--project-dir", dbt_project_dir, "--profiles-dir", dbt_project_dir],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env
         )
-        stdout, stderr = proc.communicate(input=stdin_data, timeout=60)
-        
-        if stderr:
-            logger.debug(f"dbt-mcp discovery stderr: {stderr}")
-
-        tools = []
+        stdout, _ = proc.communicate(input=stdin_data, timeout=30)
         for line in stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                if isinstance(data, dict) and data.get("id") == 2:
-                    raw_tools = data.get("result", {}).get("tools", [])
-                    tools = raw_tools
-                    break
-            except json.JSONDecodeError:
-                continue
-        return tools
-    except subprocess.TimeoutExpired:
-        if 'proc' in locals(): proc.kill()
-        logger.error("dbt-mcp schema fetch timed out after 60s")
-        return []
-    except Exception as e:
-        logger.error(f"dbt-mcp schema fetch error: {e}")
-        return []
+            data = json.loads(line)
+            if data.get("id") == 2: return data.get("result", {}).get("tools", [])
+    except: pass
+    return []
 
-
-def call_mcp_tool_sync(tool_name: str, arguments: dict) -> str:
-    """
-    Calls a dbt-mcp tool synchronously via subprocess JSON-RPC.
-    """
-    scripts_dir = _get_venv_scripts()
-    env = os.environ.copy()
-    env["PATH"] = f"{scripts_dir}{os.pathsep}{env.get('PATH', '')}"
-    
-    # Ensure all relevant env vars from .env are passed
-    for key, value in os.environ.items():
-        if key.startswith("DBT_") or key.startswith("DB_") or key.startswith("DISABLE_"):
-            env[key] = value
-
-    dbt_project_dir = os.path.abspath(_get_dbt_project_dir())
-    env["DBT_PROJECT_DIR"] = dbt_project_dir
-    env["DBT_PROFILES_DIR"] = dbt_project_dir
-    
-    # Force DBT_PATH if not set or incorrect
-    if not env.get("DBT_PATH"):
-        env["DBT_PATH"] = os.path.join(scripts_dir, "dbt.exe" if os.name == "nt" else "dbt")
-    
-    messages = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "agent", "version": "1.0"}
-        }},
-        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
-            "name": tool_name,
-            "arguments": arguments
-        }}
-    ]
-    
-    stdin_data = "\n".join(json.dumps(m) for m in messages) + "\n"
-    
-    try:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "dbt_mcp.main", "--project-dir", dbt_project_dir, "--profiles-dir", dbt_project_dir],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env
-        )
-        stdout, stderr = proc.communicate(input=stdin_data, timeout=60)
-        
-        for line in stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                if isinstance(data, dict) and data.get("id") == 2:
-                    result = data.get("result", {})
-                    if "isError" in result and result["isError"]:
-                        return f"Tool Error: {result.get('content', 'Unknown error')}"
-                    
-                    content = result.get("content", [])
-                    if isinstance(content, list):
-                        return " ".join(c.get("text", "") for c in content)
-                    return str(content)
-            except json.JSONDecodeError:
-                continue
-        return f"No result returned. Stderr: {stderr}"
-    except subprocess.TimeoutExpired:
-        if 'proc' in locals(): proc.kill()
-        return f"Tool '{tool_name}' timed out after 60s."
-    except Exception as e:
-        return f"Tool error: {e}"
-
-
-# Cache tool schemas at module load time (once)
 _cached_tool_schemas = None
-
 def get_cached_tool_schemas() -> list:
     global _cached_tool_schemas
     if _cached_tool_schemas is None:
-        logger.info("Fetching dbt-mcp tool schemas (one time)...")
         _cached_tool_schemas = fetch_mcp_tool_schemas()
-        logger.info(f"Found {len(_cached_tool_schemas)} dbt-mcp tools")
     return _cached_tool_schemas
 
-
 def build_langchain_tools() -> List[Any]:
-    """
-    Builds LangChain StructuredTool objects from cached MCP tool schemas.
-    Uses synchronous subprocess calls for tool execution (no anyio conflict).
-    """
     raw_tools = get_cached_tool_schemas()
     langchain_tools = []
     
@@ -198,69 +177,34 @@ def build_langchain_tools() -> List[Any]:
         input_schema = raw_tool.get("inputSchema") or {}
         
         def _make_tool(name: str, desc: str, schema: dict):
-            # Pre-calculate fields that expect lists to handle string fallbacks
-            list_params = []
-            properties = schema.get("properties", {})
-            for p_name, p_data in properties.items():
-                if p_data.get("type") == "array":
-                    list_params.append(p_name)
+            list_params = [p for p, d in schema.get("properties", {}).items() if d.get("type") == "array"]
 
             async def _invoke(**kwargs) -> str:
-                # Fallback: if a param expects a list but the LLM sent a string, wrap it.
-                # This fixes "Input should be a valid list" validation errors.
                 for lp in list_params:
                     if lp in kwargs and isinstance(kwargs[lp], str):
                         kwargs[lp] = [kwargs[lp]]
-                
-                # Run synchronous subprocess in thread pool to not block the event loop
-                loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(None, call_mcp_tool_sync, name, kwargs)
+                return await _persistent_client.call_tool(name, kwargs)
             
-            # Build Pydantic model for strong typing
             fields = {}
-            required_fields = schema.get("required", [])
-            
-            for prop_name, prop_data in properties.items():
-                # Map JSON schema types to Python types for strong Pydantic validation
-                schema_type = prop_data.get("type", "string")
-                type_map = {
-                    "string": str,
-                    "integer": int,
-                    "number": float,
-                    "boolean": bool,
-                    "array": list,
-                    "object": dict
-                }
-                ptype = type_map.get(schema_type, str)
-                
-                desc_field = prop_data.get("description", "")
-                if prop_name in required_fields:
-                    fields[prop_name] = (ptype, Field(..., description=desc_field))
+            required = schema.get("required", [])
+            for p_name, p_data in schema.get("properties", {}).items():
+                ptype = {"string":str,"integer":int,"number":float,"boolean":bool,"array":list,"object":dict}.get(p_data.get("type"), str)
+                if p_name in required:
+                    fields[p_name] = (ptype, Field(..., description=p_data.get("description", "")))
                 else:
-                    fields[prop_name] = (ptype, Field(None, description=desc_field))
+                    fields[p_name] = (ptype, Field(None, description=p_data.get("description", "")))
             
             ArgsModel = create_model(f"{name.title().replace('_','')}Args", __base__=BaseModel, **fields)
-            
-            return StructuredTool.from_function(
-                coroutine=_invoke,
-                name=name,
-                description=desc,
-                args_schema=ArgsModel
-            )
+            return StructuredTool.from_function(coroutine=_invoke, name=name, description=desc, args_schema=ArgsModel)
         
         langchain_tools.append(_make_tool(tool_name, tool_desc, input_schema))
-    
     return langchain_tools
 
-
-# Cache built tools
 _cached_langchain_tools = None
-
 class DbtMcpIntegrationShim:
     async def get_langchain_tools(self) -> List[Any]:
         global _cached_langchain_tools
         if _cached_langchain_tools is None:
-            logger.info("Building LangChain tools from MCP schemas...")
             _cached_langchain_tools = build_langchain_tools()
         return _cached_langchain_tools
 

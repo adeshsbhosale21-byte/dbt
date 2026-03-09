@@ -162,29 +162,33 @@ async def executor_node(state: AgentState):
 
 
 async def handle_tool_execution(state: AgentState):
-    """Routes LLM tool calls to the dbt-mcp subprocess."""
+    """Routes LLM tool calls to the dbt-mcp subprocess in parallel."""
     last_message = state["messages"][-1]
-    responses = []
     
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        t_calls = last_message.tool_calls
-        logger.info(f"Executing {len(t_calls)} tools: {[call['name'] for call in t_calls]}")
-        tools = await mcp_integration.get_langchain_tools()
-        tools_map = {t.name: t for t in tools}
-        
-        for call in t_calls:
-            t_name = call["name"]
-            tool_fn = tools_map.get(t_name)
-            if tool_fn:
-                try:
-                    result = await tool_fn.ainvoke(call["args"])
-                    responses.append(ToolMessage(content=result, tool_call_id=call["id"], name=t_name))
-                except Exception as e:
-                    responses.append(ToolMessage(content=f"Error: {str(e)}", tool_call_id=call["id"], name=t_name))
-            else:
-                responses.append(ToolMessage(content=f"Error: Tool '{t_name}' not found.", tool_call_id=call["id"], name=t_name))
+    if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
+        return {"messages": []}
+
+    t_calls = last_message.tool_calls
+    logger.info(f"Executing {len(t_calls)} tools in parallel: {[call['name'] for call in t_calls]}")
+    
+    tools = await mcp_integration.get_langchain_tools()
+    tools_map = {t.name: t for t in tools}
+    
+    async def run_one_tool(call):
+        t_name = call["name"]
+        tool_fn = tools_map.get(t_name)
+        if not tool_fn:
+            return ToolMessage(content=f"Error: Tool '{t_name}' not found.", tool_call_id=call["id"], name=t_name)
+        try:
+            result = await tool_fn.ainvoke(call["args"])
+            return ToolMessage(content=result, tool_call_id=call["id"], name=t_name)
+        except Exception as e:
+            return ToolMessage(content=f"Error: {str(e)}", tool_call_id=call["id"], name=t_name)
+
+    # Execute all tool calls concurrently
+    responses = await asyncio.gather(*(run_one_tool(call) for call in t_calls))
                 
-    return {"messages": responses}
+    return {"messages": list(responses)}
 
 def should_continue(state: AgentState):
     """Determines if the graph should proceed to tools or end."""
