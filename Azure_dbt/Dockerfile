@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   python3-dev \
   git \
   curl \
+  nginx \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -21,20 +22,27 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
   pip install --no-cache-dir -r requirements.txt
 
+# Copy Nginx Config
+COPY nginx.conf /etc/nginx/nginx.conf
+
 # Copy project files
 COPY app/ ./app/
 COPY frontend/ ./frontend/
 COPY local_dbt_test/ ./local_dbt_test/
 
+# Copy Startup script
+COPY start.sh .
+RUN chmod +x start.sh
+
 # Create logs and sessions directories
 RUN mkdir -p logs app/sessions && chmod 777 logs app/sessions
 
-# Expose port
+# Expose public port
 EXPOSE 8000
 
 # Health check for Azure Container Apps
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
-# Start
-CMD ["python", "-m", "app.main"]
+# Start Nginx & FastAPI
+CMD ["./start.sh"]
