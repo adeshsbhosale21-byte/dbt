@@ -253,9 +253,15 @@ def build_langchain_tools() -> List[Any]:
     return langchain_tools
 
 
-# Compatibility shim - same interface as before
+# Cache built tools
+_cached_langchain_tools = None
+
 class DbtMcpIntegrationShim:
     async def get_langchain_tools(self) -> List[Any]:
-        return build_langchain_tools()
+        global _cached_langchain_tools
+        if _cached_langchain_tools is None:
+            logger.info("Building LangChain tools from MCP schemas...")
+            _cached_langchain_tools = build_langchain_tools()
+        return _cached_langchain_tools
 
 mcp_integration = DbtMcpIntegrationShim()
