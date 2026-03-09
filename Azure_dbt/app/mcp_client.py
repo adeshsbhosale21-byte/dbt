@@ -88,6 +88,13 @@ class PersistentMcpClient:
         self._initialized = True
         logger.info("Persistent dbt-mcp initialized and ready.")
 
+    async def pre_warm(self):
+        """Proactively start the subprocess and fetch tools."""
+        async with self.lock:
+            await self._start_if_needed()
+            # Also ensure tools are built
+            get_cached_tool_schemas()
+
     async def call_tool(self, tool_name: str, arguments: dict) -> str:
         async with self.lock:
             await self._start_if_needed()

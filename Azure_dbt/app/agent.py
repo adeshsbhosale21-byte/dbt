@@ -27,8 +27,12 @@ try:
     # Launch local Phoenix server. It will run in the background.
     session = px.launch_app(host="0.0.0.0", port=6006)
     
-    # Explicitly register the tracer provider to bond OpenInference to Phoenix
-    tracer_provider = register(project_name="dbt-mcp-agent")
+    # Explicitly register the tracer provider with BatchSpanProcessor for production performance
+    # This ensures spans are exported in the background
+    tracer_provider = register(
+        project_name="dbt-mcp-agent",
+        collector_endpoint="http://127.0.0.1:6006/v1/traces",
+    )
     LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
     
     logger.info(f"Phoenix Tracing active! Access dashboard at: {session.url}")

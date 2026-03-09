@@ -55,6 +55,14 @@ async def init_pg():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan manager for FastAPI (replaces startup/shutdown events)."""
+    # 1. Pre-warm MCP client (starts dbt subprocess and loads tools)
+    logger.info("Pre-warming MCP client...")
+    try:
+        await mcp_integration.pre_warm()
+        logger.info("MCP client pre-warmed successfully.")
+    except Exception as e:
+        logger.error(f"MCP pre-warm failed: {e}")
+
     await init_pg()
     
     # Initialize Persistent Agent Memory
