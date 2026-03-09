@@ -16,13 +16,21 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # ─── Phoenix Tracing Setup ───
 import phoenix as px
+from phoenix.otel import register
 from openinference.instrumentation.langchain import LangChainInstrumentor
 
 logger.info("Initializing Arize Phoenix Tracing...")
 try:
+    # Set collector endpoint for OpenInference (internal OTLP)
+    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "http://127.0.0.1:6006"
+    
     # Launch local Phoenix server. It will run in the background.
     session = px.launch_app(host="0.0.0.0", port=6006)
-    LangChainInstrumentor().instrument()
+    
+    # Explicitly register the tracer provider to bond OpenInference to Phoenix
+    tracer_provider = register(project_name="dbt-mcp-agent")
+    LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+    
     logger.info(f"Phoenix Tracing active! Access dashboard at: {session.url}")
 except Exception as e:
     logger.error(f"Failed to initialize Phoenix: {e}")
