@@ -299,7 +299,7 @@ async def websocket_chat(websocket: WebSocket):
             config = {"configurable": {"thread_id": current_thread_id}}
             state = agent_app.get_state(config)
             
-            if state.next and "tools" in state.next:
+            if state.next and "sensitive_tools" in state.next:
                 ans = chat_text.lower().strip()
                 if ans in ["yes", "approve", "approved", "go ahead", "do it"]:
                     await run_and_stream(None, config)
@@ -316,6 +316,9 @@ async def websocket_chat(websocket: WebSocket):
                     await websocket.send_json({"type": "agent_state", "content": "Action cancelled."})
                     await websocket.send_json({"type": "status", "content": "ready"})
                     continue
+                else:
+                    await websocket.send_json({"type": "error", "content": "Please approve or cancel the pending action before continuing."})
+                    continue
 
             if not apply_guardrails(chat_text, "input"):
                 await websocket.send_json({"type": "error", "content": "Security violation."})
@@ -326,7 +329,7 @@ async def websocket_chat(websocket: WebSocket):
             
             # Pivot Protection
             state = agent_app.get_state(config)
-            if state.next and "tools" in state.next:
+            if state.next and "sensitive_tools" in state.next:
                 last_msg = state.values["messages"][-1]
                 close_msgs = [
                     ToolMessage(content="User pivoted to a new question.", tool_call_id=tc["id"]) 
@@ -358,19 +361,8 @@ async def websocket_chat(websocket: WebSocket):
                             if "messages" in state_output and state_output["messages"]:
                                 latest_msg = state_output["messages"][-1]
                                 
-                                # 1. SENSITIVE TOOLS (Approval Required)
-                                if node_name == "sensitive_tools":
-                                    logger.info(f"Sensitive tools call: {[tc['name'] for tc in latest_msg.tool_calls]}")
-                                    await websocket.send_json({
-                                        "type": "approval_request",
-                                        "tool": [tc['name'] for tc in latest_msg.tool_calls]
-                                    })
-                                    is_processing = False
-                                    await websocket.send_json({"type": "status", "content": "waiting_approval"})
-                                    return
-                                    
-                                # 2. SAFE TOOLS or EXECUTOR with tool calls (Background Execution)
-                                elif hasattr(latest_msg, "tool_calls") and latest_msg.tool_calls:
+                                # 1. EXECUTOR generated tool calls
+                                if node_name == "executor" and hasattr(latest_msg, "tool_calls") and latest_msg.tool_calls:
                                     t_names = [tc['name'] for tc in latest_msg.tool_calls]
                                     logger.info(f"Background executing tools: {t_names}")
                                     # Send status update so user knows agent is "thinking" or "calling"
@@ -380,8 +372,8 @@ async def websocket_chat(websocket: WebSocket):
                                     })
                                     continue
                                     
-                                # 3. TOOL OUTPUTS (Safe)
-                                elif isinstance(latest_msg, ToolMessage):
+                                # 2. TOOL OUTPUTS (Safe or Sensitive)
+                                elif node_name in ["safe_tools", "sensitive_tools"] and isinstance(latest_msg, ToolMessage):
                                     t_name = getattr(latest_msg, "name", "tool")
                                     logger.debug(f"Tool {t_name} output received.")
                                     await websocket.send_json({
@@ -390,7 +382,7 @@ async def websocket_chat(websocket: WebSocket):
                                     })
                                     continue
 
-                                # 4. FINAL or INTERMEDIATE AI RESPONSES
+                                # 3. FINAL or INTERMEDIATE AI RESPONSES
                                 else:
                                     content = latest_msg.content
                                     if not content: continue
@@ -401,6 +393,20 @@ async def websocket_chat(websocket: WebSocket):
                                         "type": "agent_state", "node": node_name, "content": content
                                     })
                     
+                    # Check if interrupted for approval
+                    current_state = agent_app.get_state(conf)
+                    if current_state.next and "sensitive_tools" in current_state.next:
+                        latest_msg = current_state.values["messages"][-1]
+                        logger.info(f"Graph paused for sensitive tools: {[tc['name'] for tc in latest_msg.tool_calls]}")
+                        await websocket.send_json({
+                            "type": "approval_request",
+                            "tool": [tc['name'] for tc in latest_msg.tool_calls]
+                        })
+                        is_processing = False
+                        await websocket.send_json({"type": "status", "content": "waiting_approval"})
+                        return
+                    
+                    # fully done
                     is_processing = False
                     await websocket.send_json({"type": "status", "content": "ready"})
                     await websocket.send_json({"type": "done"})
