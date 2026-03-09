@@ -188,6 +188,24 @@ async def load_history(thread_id: str) -> List:
             return []
     return []
 
+async def rename_session(session_id: str, new_title: str):
+    if pg_pool:
+        try:
+            async with pg_pool.acquire() as conn:
+                await conn.execute("UPDATE sessions_meta SET title = $1 WHERE id = $2", new_title, session_id)
+                logger.info(f"PG renamed session: {session_id} to {new_title}")
+                return
+        except Exception as e:
+            logger.error(f"PG rename_session failed: {e}")
+    # Local fallback
+    meta = await load_metadata()
+    for m in meta:
+        if m["id"] == session_id:
+            m["title"] = new_title
+            break
+    with open(METADATA_PATH, "w") as f:
+        json.dump(meta, f, indent=2)
+
 async def delete_session(session_id: str):
     if pg_pool:
         try:
@@ -253,24 +271,46 @@ async def websocket_chat(websocket: WebSocket):
                     await websocket.send_json({"type": "status", "content": "ready"})
                     continue
                 
+                elif cmd_type == "rename_session":
+                    sid = data_json.get("id")
+                    new_title = data_json.get("title")
+                    logger.info(f"Renaming session: {sid} to {new_title}")
+                    await rename_session(sid, new_title)
+                    meta = await load_metadata()
+                    await websocket.send_json({"type": "sessions_list", "content": meta})
+                    continue
+                
                 elif cmd_type == "approval_response":
                     value = data_json.get("value")
                     logger.info(f"Received tool approval response: {value}")
                     config = {"configurable": {"thread_id": current_thread_id}}
                     state = agent_app.get_state(config)
+                    last_msg = state.values["messages"][-1]
+                    
+                    tool_details = []
+                    for tc in last_msg.tool_calls:
+                        args_str = json.dumps(tc.get('args', {}), indent=2)
+                        tool_details.append(f"**Tool:** `{tc['name']}`\n```json\n{args_str}\n```")
+                    tool_details_str = "\n\n".join(tool_details)
                     
                     if value == "yes":
+                        approval_msg = f"✅ **Execution Approved**\n\n{tool_details_str}"
+                        session_messages.append({"role": "ai", "content": approval_msg})
+                        await save_history(current_thread_id, session_messages)
+                        await websocket.send_json({"type": "agent_state", "node": "system", "content": approval_msg})
+                        
                         await run_and_stream(None, config)
                     else:
-                        last_msg = state.values["messages"][-1]
                         cancellation_msgs = [
                             ToolMessage(content="Action cancelled by user.", tool_call_id=tc["id"]) 
                             for tc in last_msg.tool_calls
                         ]
                         agent_app.update_state(config, {"messages": cancellation_msgs})
-                        session_messages.append({"role": "ai", "content": "Action cancelled."})
+                        
+                        cancel_msg = f"❌ **Execution Cancelled by User**\n\n{tool_details_str}"
+                        session_messages.append({"role": "ai", "content": cancel_msg})
                         await save_history(current_thread_id, session_messages)
-                        await websocket.send_json({"type": "agent_state", "content": "Action cancelled."})
+                        await websocket.send_json({"type": "agent_state", "node": "system", "content": cancel_msg})
                         await websocket.send_json({"type": "status", "content": "ready"})
                     continue
                 
@@ -301,19 +341,30 @@ async def websocket_chat(websocket: WebSocket):
             
             if state.next and "sensitive_tools" in state.next:
                 ans = chat_text.lower().strip()
+                last_msg = state.values["messages"][-1]
+                tool_details = []
+                for tc in last_msg.tool_calls:
+                    args_str = json.dumps(tc.get('args', {}), indent=2)
+                    tool_details.append(f"**Tool:** `{tc['name']}`\n```json\n{args_str}\n```")
+                tool_details_str = "\n\n".join(tool_details)
+                
                 if ans in ["yes", "approve", "approved", "go ahead", "do it"]:
+                    approval_msg = f"✅ **Execution Approved**\n\n{tool_details_str}"
+                    session_messages.append({"role": "ai", "content": approval_msg})
+                    await save_history(current_thread_id, session_messages)
+                    await websocket.send_json({"type": "agent_state", "node": "system", "content": approval_msg})
                     await run_and_stream(None, config)
                     continue
                 elif ans in ["no", "cancel", "stop", "abort"]:
-                    last_msg = state.values["messages"][-1]
                     cancellation_msgs = [
                         ToolMessage(content="Action cancelled by user.", tool_call_id=tc["id"]) 
                         for tc in last_msg.tool_calls
                     ]
                     agent_app.update_state(config, {"messages": cancellation_msgs})
-                    session_messages.append({"role": "ai", "content": "Action cancelled."})
+                    cancel_msg = f"❌ **Execution Cancelled by User**\n\n{tool_details_str}"
+                    session_messages.append({"role": "ai", "content": cancel_msg})
                     await save_history(current_thread_id, session_messages)
-                    await websocket.send_json({"type": "agent_state", "content": "Action cancelled."})
+                    await websocket.send_json({"type": "agent_state", "node": "system", "content": cancel_msg})
                     await websocket.send_json({"type": "status", "content": "ready"})
                     continue
                 else:
@@ -400,7 +451,8 @@ async def websocket_chat(websocket: WebSocket):
                         logger.info(f"Graph paused for sensitive tools: {[tc['name'] for tc in latest_msg.tool_calls]}")
                         await websocket.send_json({
                             "type": "approval_request",
-                            "tool": [tc['name'] for tc in latest_msg.tool_calls]
+                            "tool": [tc['name'] for tc in latest_msg.tool_calls],
+                            "arguments": [tc.get('args', {}) for tc in latest_msg.tool_calls]
                         })
                         is_processing = False
                         await websocket.send_json({"type": "status", "content": "waiting_approval"})
