@@ -212,7 +212,7 @@ class DbtMcpIntegrationShim:
     async def get_langchain_tools(self) -> List[Any]:
         global _cached_langchain_tools
         if _cached_langchain_tools is None:
-            _cached_langchain_tools = await build_langchain_tools()
+            _cached_langchain_tools = build_langchain_tools()
         return _cached_langchain_tools
 
     async def pre_warm(self):
